@@ -1,0 +1,27 @@
+# Données générées (peuvent être recréées avec generate_modashop_data.py)
+modashop_data/
+modashop.duckdb
+*.csv
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Streamlit
+.streamlit/secrets.toml
