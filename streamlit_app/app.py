@@ -30,13 +30,45 @@ st.set_page_config(
 
 DB_PATH = Path(__file__).parent.parent / "modashop.duckdb"
 
-# Génération automatique de la base au premier lancement (pour Streamlit Cloud)
+
+# ====================================================================
+# GÉNÉRATION AUTOMATIQUE AU PREMIER LANCEMENT (Streamlit Cloud)
+# ====================================================================
+# Sur Streamlit Cloud, le fichier .duckdb n'existe pas au premier accès.
+# On le construit en important directement les modules (plus fiable que subprocess).
+
 if not DB_PATH.exists():
-    import subprocess
-    with st.spinner("🚀 Premier lancement - génération des données (~1 min)..."):
-        root = Path(__file__).parent.parent
-        subprocess.run(["python", str(root / "generate_modashop_data.py")], cwd=root, check=True)
-        subprocess.run(["python", str(root / "load_duckdb.py")], cwd=root, check=True)
+    import sys
+    root = Path(__file__).parent.parent
+    sys.path.insert(0, str(root))
+
+    with st.spinner("🚀 Premier lancement — génération des données (~1 min)..."):
+        # 1) Génère les CSV si besoin
+        data_dir = root / "modashop_data"
+        if not data_dir.exists() or not any(data_dir.glob("*.csv")):
+            import generate_modashop_data
+            # On exécute la fonction main du script (ou tout le script si pas de main)
+            if hasattr(generate_modashop_data, "main"):
+                # Le script utilise un chemin relatif, on bascule dans la racine
+                import os
+                old_cwd = os.getcwd()
+                os.chdir(root)
+                try:
+                    generate_modashop_data.main()
+                finally:
+                    os.chdir(old_cwd)
+
+        # 2) Charge dans DuckDB
+        import load_duckdb
+        import os
+        old_cwd = os.getcwd()
+        os.chdir(root)
+        try:
+            load_duckdb.main()
+        finally:
+            os.chdir(old_cwd)
+
+    st.success("✅ Données générées avec succès !")
     st.rerun()
 
 

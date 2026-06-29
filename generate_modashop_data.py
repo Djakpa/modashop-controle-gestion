@@ -41,7 +41,7 @@ CA_CIBLE_N = 85_000_000  # 85 M€
 CROISSANCE_N = 0.12      # +12% vs N-1
 CA_CIBLE_N_1 = CA_CIBLE_N / (1 + CROISSANCE_N)
 
-OUTPUT_DIR = Path("./data")
+OUTPUT_DIR = Path("./modashop_data")
 OUTPUT_DIR.mkdir(exist_ok=True)
 
 
