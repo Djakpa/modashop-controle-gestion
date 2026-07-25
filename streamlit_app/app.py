@@ -15,6 +15,9 @@ import duckdb
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
+import tempfile
+import sys
+import os
 from pathlib import Path
 
 # ====================================================================
@@ -28,41 +31,51 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-DB_PATH = Path(__file__).parent.parent / "modashop.duckdb"
+# ====================================================================
+# CHEMINS — compatibles LOCAL et STREAMLIT CLOUD
+# ====================================================================
 
+# Sur Streamlit Cloud, on écrit dans /tmp (seul dossier accessible en écriture)
+DB_PATH  = Path(tempfile.gettempdir()) / "modashop.duckdb"
+DATA_DIR = Path(tempfile.gettempdir()) / "modashop_data"
+
+# Racine du projet (dossier parent de streamlit_app/)
+ROOT = Path(__file__).parent.parent
 
 # ====================================================================
-# GÉNÉRATION AUTOMATIQUE AU PREMIER LANCEMENT (Streamlit Cloud)
+# GÉNÉRATION AUTOMATIQUE AU PREMIER LANCEMENT
 # ====================================================================
-# Sur Streamlit Cloud, le fichier .duckdb n'existe pas au premier accès.
-# On le construit en important directement les modules (plus fiable que subprocess).
 
 if not DB_PATH.exists():
-    import sys
-    root = Path(__file__).parent.parent
-    sys.path.insert(0, str(root))
+    sys.path.insert(0, str(ROOT))
 
     with st.spinner("🚀 Premier lancement — génération des données (~1 min)..."):
-        # 1) Génère les CSV si besoin
-        data_dir = root / "modashop_data"
-        if not data_dir.exists() or not any(data_dir.glob("*.csv")):
-            import generate_modashop_data
-            # On exécute la fonction main du script (ou tout le script si pas de main)
-            if hasattr(generate_modashop_data, "main"):
-                # Le script utilise un chemin relatif, on bascule dans la racine
-                import os
-                old_cwd = os.getcwd()
-                os.chdir(root)
-                try:
-                    generate_modashop_data.main()
-                finally:
-                    os.chdir(old_cwd)
 
-        # 2) Charge dans DuckDB
+        # ── Étape 1 : générer les CSV ────────────────────────────────
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+        if not any(DATA_DIR.glob("*.csv")):
+            import generate_modashop_data
+
+            # On redirige le dossier de sortie vers /tmp/modashop_data
+            generate_modashop_data.OUTPUT_DIR = DATA_DIR
+
+            old_cwd = os.getcwd()
+            os.chdir(ROOT)
+            try:
+                generate_modashop_data.main()
+            finally:
+                os.chdir(old_cwd)
+
+        # ── Étape 2 : charger dans DuckDB ───────────────────────────
         import load_duckdb
-        import os
+
+        # On redirige les chemins vers /tmp
+        load_duckdb.DATA_DIR = DATA_DIR
+        load_duckdb.DB_PATH  = str(DB_PATH)
+
         old_cwd = os.getcwd()
-        os.chdir(root)
+        os.chdir(ROOT)
         try:
             load_duckdb.main()
         finally:
@@ -70,7 +83,6 @@ if not DB_PATH.exists():
 
     st.success("✅ Données générées avec succès !")
     st.rerun()
-
 
 # ====================================================================
 # CONNEXION CACHÉE (perf)
@@ -105,7 +117,7 @@ st.sidebar.markdown(
     "incluant 5 anomalies volontairement injectées pour rendre "
     "l'analyse réaliste."
 )
-st.sidebar.markdown("📂 [Code source GitHub](https://github.com/)")
+st.sidebar.markdown("📂 [Code source GitHub](https://github.com/Djakpa/modashop-controle-gestion)")
 
 # Filtre canal SQL
 filtre_canal = "" if canal_choisi == "Tous" else f"AND canal = '{canal_choisi}'"
@@ -138,7 +150,6 @@ kpis_query = f"""
 """
 kpis = run_query(kpis_query).iloc[0]
 
-# KPI N-1 pour comparaison
 kpis_n_1_query = f"""
     SELECT SUM(ca_ht) AS ca, SUM(marge_brute_ht) AS marge
     FROM v_ventes
@@ -149,31 +160,16 @@ kpis_n_1 = run_query(kpis_n_1_query).iloc[0]
 col1, col2, col3, col4 = st.columns(4)
 with col1:
     delta_ca = (kpis['ca'] - kpis_n_1['ca']) / kpis_n_1['ca'] * 100 if kpis_n_1['ca'] else 0
-    st.metric(
-        "💰 Chiffre d'affaires",
-        f"{kpis['ca']/1e6:,.1f} M€",
-        f"{delta_ca:+.1f}% vs N-1"
-    )
+    st.metric("💰 Chiffre d'affaires", f"{kpis['ca']/1e6:,.1f} M€", f"{delta_ca:+.1f}% vs N-1")
 with col2:
     delta_m = (kpis['marge'] - kpis_n_1['marge']) / kpis_n_1['marge'] * 100 if kpis_n_1['marge'] else 0
-    st.metric(
-        "📈 Marge brute",
-        f"{kpis['marge']/1e6:,.1f} M€",
-        f"{delta_m:+.1f}% vs N-1"
-    )
+    st.metric("📈 Marge brute", f"{kpis['marge']/1e6:,.1f} M€", f"{delta_m:+.1f}% vs N-1")
 with col3:
-    taux_marge = kpis['marge'] / kpis['ca'] * 100 if kpis['ca'] else 0
+    taux_marge   = kpis['marge']     / kpis['ca']     * 100 if kpis['ca']     else 0
     taux_marge_n_1 = kpis_n_1['marge'] / kpis_n_1['ca'] * 100 if kpis_n_1['ca'] else 0
-    st.metric(
-        "🎯 Taux de marge",
-        f"{taux_marge:.1f}%",
-        f"{taux_marge - taux_marge_n_1:+.1f} pts"
-    )
+    st.metric("🎯 Taux de marge", f"{taux_marge:.1f}%", f"{taux_marge - taux_marge_n_1:+.1f} pts")
 with col4:
-    st.metric(
-        "📦 Articles vendus",
-        f"{kpis['qte']:,.0f}".replace(",", " ")
-    )
+    st.metric("📦 Articles vendus", f"{kpis['qte']:,.0f}".replace(",", " "))
 
 st.markdown("---")
 
@@ -356,7 +352,6 @@ with tab3:
         FROM pivot_annees ORDER BY ABS(ca_n - ca_n_1) DESC
     """)
 
-    # Waterfall par catégorie
     fig = go.Figure()
     for _, row in df_pvm.iterrows():
         fig.add_trace(go.Bar(
@@ -414,7 +409,6 @@ with tab4:
         labels={'annee_mois': 'Mois', 'dso_jours': 'DSO (jours)'},
         color_discrete_map={'Web': '#3B82F6', 'Marketplace': '#EF4444', 'Boutique': '#10B981'}
     )
-    # Annotation visuelle de l'anomalie (méthode robuste : shape + annotation)
     fig.add_shape(
         type="line", xref="x", yref="paper",
         x0="2025-04", x1="2025-04", y0=0, y1=1,
