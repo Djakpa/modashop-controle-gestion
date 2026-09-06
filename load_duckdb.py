@@ -26,8 +26,8 @@ from pathlib import Path
 # CONFIGURATION
 # ====================================================================
 
-DATA_DIR = Path("./modashop_data")     # Dossier contenant les CSV
-DB_PATH  = "modashop.duckdb"           # Fichier base DuckDB en sortie
+DATA_DIR = Path("./modashop_data")     # Sera écrasé par app.py
+DB_PATH  = "modashop.duckdb"           # Sera écrasé par app.py
 
 # Mapping nom_table -> fichier CSV
 TABLES = {
@@ -55,25 +55,22 @@ def charger_donnees():
     print("CHARGEMENT MODASHOP DANS DUCKDB")
     print("=" * 60)
 
-    # On ouvre la connexion (crée le fichier si inexistant)
-    con = duckdb.connect(DB_PATH)
+    # ✅ CORRECTION : str(DB_PATH) pour supporter Path et str
+    con = duckdb.connect(str(DB_PATH))
     print(f"\n📂 Base ouverte : {DB_PATH}")
 
-    # On vide les anciennes tables au cas où on relance le script
     print("\n[1/4] Nettoyage des tables existantes...")
     for table in TABLES.keys():
         con.execute(f"DROP TABLE IF EXISTS {table};")
         con.execute(f"DROP VIEW IF EXISTS {table};")
 
-    # Chargement de chaque CSV en table
     print("\n[2/4] Chargement des CSV...")
     for table, fichier in TABLES.items():
-        chemin = DATA_DIR / fichier
+        # ✅ CORRECTION : DATA_DIR est une variable globale modifiable depuis app.py
+        chemin = Path(str(DATA_DIR)) / fichier
         if not chemin.exists():
             raise FileNotFoundError(f"❌ Fichier introuvable : {chemin}")
 
-        # read_csv_auto détecte les types automatiquement
-        # delim=';' car nos CSV sont au format français
         con.execute(f"""
             CREATE TABLE {table} AS
             SELECT * FROM read_csv_auto('{chemin}', delim=';', header=true);
@@ -89,15 +86,8 @@ def charger_donnees():
 # ====================================================================
 
 def creer_vues(con):
-    """
-    Crée 3 vues qui seront réutilisées dans toutes les analyses.
-    Ça t'évitera de réécrire les jointures à chaque requête.
-    """
     print("\n[3/4] Création des vues d'analyse...")
 
-    # ─── Vue 1 : ventes enrichies ─────────────────────────────────
-    # Ajoute aux ventes les dimensions canal et catégorie produit
-    # + colonnes pratiques (mois, marge, etc.)
     con.execute("""
         CREATE OR REPLACE VIEW v_ventes AS
         SELECT
@@ -124,7 +114,6 @@ def creer_vues(con):
     """)
     print("  ✓ v_ventes (jointure ventes + produit + canal)")
 
-    # ─── Vue 2 : P&L mensuel agrégé ───────────────────────────────
     con.execute("""
         CREATE OR REPLACE VIEW v_pnl_mensuel AS
         SELECT
@@ -143,7 +132,6 @@ def creer_vues(con):
     """)
     print("  ✓ v_pnl_mensuel (P&L agrégé canal × catégorie × mois)")
 
-    # ─── Vue 3 : encaissements enrichis ───────────────────────────
     con.execute("""
         CREATE OR REPLACE VIEW v_encaissements AS
         SELECT
@@ -166,12 +154,8 @@ def creer_vues(con):
 # ====================================================================
 
 def controles(con):
-    """
-    Lance quelques requêtes pour vérifier que tout est bien chargé.
-    """
     print("\n[4/4] Contrôles de cohérence...\n")
 
-    # CA par année
     print("📊 CA par année :")
     res = con.execute("""
         SELECT annee,
@@ -186,11 +170,10 @@ def controles(con):
     for r in res:
         print(f"  {r[0]:<8}{r[1]:<12}{r[2]:<14}{r[3]:<10}%")
 
-    # Mix canal en N
     print("\n📊 Mix canal en 2025 :")
     res = con.execute("""
         SELECT canal,
-               ROUND(SUM(ca_ht)/1e6, 2)               AS ca_m_euros,
+               ROUND(SUM(ca_ht)/1e6, 2) AS ca_m_euros,
                ROUND(SUM(ca_ht)/(SELECT SUM(ca_ht) FROM v_ventes WHERE annee=2025)*100, 1) AS part_pc
         FROM v_ventes
         WHERE annee = 2025
@@ -200,21 +183,6 @@ def controles(con):
     for r in res:
         print(f"  {r[0]:<15} {r[1]:>6} M€  ({r[2]}%)")
 
-    # Mix catégorie en N
-    print("\n📊 Mix catégorie en 2025 :")
-    res = con.execute("""
-        SELECT categorie,
-               ROUND(SUM(ca_ht)/1e6, 2)               AS ca_m_euros,
-               ROUND(SUM(ca_ht)/(SELECT SUM(ca_ht) FROM v_ventes WHERE annee=2025)*100, 1) AS part_pc
-        FROM v_ventes
-        WHERE annee = 2025
-        GROUP BY categorie
-        ORDER BY ca_m_euros DESC;
-    """).fetchall()
-    for r in res:
-        print(f"  {r[0]:<15} {r[1]:>6} M€  ({r[2]}%)")
-
-    # Vérif anomalie #3 : DSO marketplaces
     print("\n📊 DSO moyen marketplaces par trimestre (anomalie #3 attendue : +15j en Q2 2025) :")
     res = con.execute("""
         SELECT annee_mois,
@@ -235,7 +203,6 @@ def controles(con):
     print(f"\n💡 Pour explorer interactivement :")
     print(f"   - Avec Python  : duckdb.connect('{DB_PATH}')")
     print(f"   - En ligne de commande : duckdb {DB_PATH}")
-    print(f"   - Avec DBeaver / TablePlus : ouvrir le fichier {DB_PATH}")
 
 
 # ====================================================================
