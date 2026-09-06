@@ -31,7 +31,7 @@ DATA_DIR = TMP / "modashop_data"
 ROOT     = Path(__file__).parent.parent
 
 # ====================================================================
-# GÉNÉRATION AU PREMIER LANCEMENT
+# GÉNÉRATION
 # ====================================================================
 
 def generer_base():
@@ -39,25 +39,25 @@ def generer_base():
     old_cwd = os.getcwd()
     os.chdir(ROOT)
     try:
-        # Étape 1 : générer les CSV dans /tmp/modashop_data
         DATA_DIR.mkdir(parents=True, exist_ok=True)
         import generate_modashop_data as gmd
         gmd.OUTPUT_DIR = DATA_DIR
         gmd.main()
 
-        # Étape 2 : charger dans DuckDB /tmp/modashop.duckdb
         import load_duckdb as ldb
         ldb.DATA_DIR = DATA_DIR
-        ldb.DB_PATH  = str(DB_PATH)
+        ldb.DB_PATH  = DB_PATH   # ✅ On passe un Path, str() fait dans load_duckdb
         ldb.main()
     finally:
         os.chdir(old_cwd)
 
 def base_valide():
-    """Vérifie que la base existe ET que les vues sont bien chargées.
-    Indispensable car /tmp est effacé à chaque redémarrage Streamlit Cloud."""
+    """Vérifie que la base existe ET que les vues sont chargées."""
+    if not DB_PATH.exists():
+        return False
     try:
-        conn = duckdb.connect(str(DB_PATH), read_only=False)
+        # ✅ Connexion temporaire juste pour le test, fermée immédiatement
+        conn = duckdb.connect(str(DB_PATH))
         conn.execute("SELECT 1 FROM v_ventes LIMIT 1")
         conn.close()
         return True
@@ -76,8 +76,7 @@ if not base_valide():
 
 @st.cache_resource
 def get_connection():
-    # read_only=False pour éviter le conflit de connexion
-    return duckdb.connect(str(DB_PATH), read_only=False)
+    return duckdb.connect(str(DB_PATH))
 
 @st.cache_data(ttl=3600)
 def run_query(sql: str) -> pd.DataFrame:
