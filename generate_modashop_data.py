@@ -14,7 +14,7 @@ pour rendre l'analyse de contrôle de gestion réaliste.
 Sortie : fichiers CSV dans le dossier ./data/
 Format : simule des extracts ERP (Sage / Cegid / SAP)
 
-Auteur : [Ton nom] - Projet portfolio LinkedIn
+Auteur : Cynthia Djakpa - Projet portfolio LinkedIn
 ====================================================================
 """
 
@@ -340,58 +340,66 @@ def generer_fact_encaissements(fact_ventes, dim_canal):
 
 
 # ====================================================================
-# 5. FAITS - ACHATS / STOCKS
+# 5. FAITS - ACHATS / STOCKS (vectorisé)
 # ====================================================================
 
 def generer_fact_achats(fact_ventes, dim_produit):
     """
-    Génère les achats fournisseurs mensuels par SKU.
+    Génère les achats fournisseurs mensuels par SKU (vectorisé).
     Anomalie #2 (surstock été N) : surcommandes sur PAP Femme PE en mars-avril N.
     Anomalie #5 (inflation logistique) : coûts transport +15% à partir de juin N.
     """
-    print("  → génération des achats...")
-    # On agrège ventes mensuelles par SKU pour dimensionner les achats
-    fact_ventes['annee_mois'] = pd.to_datetime(fact_ventes['date_cmd']).dt.strftime('%Y-%m')
-    ventes_mensuelles = fact_ventes.groupby(['annee_mois', 'sku']).agg(
+    print("  → génération des achats (vectorisé)...")
+
+    fv = fact_ventes.copy()
+    fv['annee'] = pd.to_datetime(fv['date_cmd']).dt.year
+    fv['mois']  = pd.to_datetime(fv['date_cmd']).dt.month
+    fv['annee_mois'] = pd.to_datetime(fv['date_cmd']).dt.strftime('%Y-%m')
+
+    ventes_mensuelles = fv.groupby(['annee_mois', 'annee', 'mois', 'sku']).agg(
         qte_vendue=('quantite', 'sum'),
-        cout_total=('cout_achat_ht', 'sum')
     ).reset_index()
 
-    achats = []
-    facture_id = 1
-    for _, row in ventes_mensuelles.iterrows():
-        produit = dim_produit[dim_produit['sku'] == row['sku']].iloc[0]
-        annee, mois = map(int, row['annee_mois'].split('-'))
-        # On commande en moyenne ce qu'on vend +/- 20%
-        qte_achat = int(row['qte_vendue'] * np.random.uniform(0.85, 1.20))
+    # Merge avec dim_produit pour récupérer catégorie, collection, prix_achat
+    vm = ventes_mensuelles.merge(
+        dim_produit[['sku', 'categorie', 'collection', 'prix_achat_ht']],
+        on='sku', how='left'
+    )
 
-        # ANOMALIE #2 : surstock été N sur PAP Femme PE
-        if annee == ANNEE_N and mois in (3, 4) and produit['categorie'] == 'PAP Femme' and produit['collection'] == 'PE':
-            qte_achat = int(qte_achat * 1.6)  # +60%
+    n = len(vm)
 
-        cout_unit = produit['prix_achat_ht']
+    # Quantité de base : +/- 20% autour du vendu
+    vm['qte_achat'] = (vm['qte_vendue'] * np.random.uniform(0.85, 1.20, n)).astype(int)
 
-        # Frais de transport ~3% du coût d'achat
-        # ANOMALIE #5 : inflation logistique +15% à partir de juin N
-        taux_transport = 0.03
-        if annee == ANNEE_N and mois >= 6:
-            taux_transport = 0.0345  # +15%
+    # ANOMALIE #2 : surstock PAP Femme PE en mars-avril N
+    mask_surstock = (
+        (vm['annee'] == ANNEE_N) &
+        (vm['mois'].isin([3, 4])) &
+        (vm['categorie'] == 'PAP Femme') &
+        (vm['collection'] == 'PE')
+    )
+    vm.loc[mask_surstock, 'qte_achat'] = (vm.loc[mask_surstock, 'qte_achat'] * 1.6).astype(int)
 
-        montant_marchandises = round(qte_achat * cout_unit, 2)
-        montant_transport = round(montant_marchandises * taux_transport, 2)
+    vm['montant_marchandises_ht'] = (vm['qte_achat'] * vm['prix_achat_ht']).round(2)
 
-        achats.append({
-            'facture_id': f'FA{facture_id:07d}',
-            'date_facture': datetime(annee, mois, np.random.randint(5, 26)),
-            'sku': row['sku'],
-            'quantite': qte_achat,
-            'montant_marchandises_ht': montant_marchandises,
-            'montant_transport_ht': montant_transport,
-            'montant_total_ht': montant_marchandises + montant_transport,
-            'delai_paiement_fourn': np.random.choice([30, 30, 45, 60], p=[0.5, 0.2, 0.2, 0.1]),
-        })
-        facture_id += 1
-    df = pd.DataFrame(achats)
+    # ANOMALIE #5 : inflation logistique +15% à partir de juin N
+    vm['taux_transport'] = 0.03
+    mask_inflation = (vm['annee'] == ANNEE_N) & (vm['mois'] >= 6)
+    vm.loc[mask_inflation, 'taux_transport'] = 0.0345
+
+    vm['montant_transport_ht'] = (vm['montant_marchandises_ht'] * vm['taux_transport']).round(2)
+    vm['montant_total_ht'] = vm['montant_marchandises_ht'] + vm['montant_transport_ht']
+
+    vm['facture_id'] = [f'FA{i+1:07d}' for i in range(n)]
+    vm['date_facture'] = vm.apply(
+        lambda r: datetime(int(r['annee']), int(r['mois']), np.random.randint(5, 26)), axis=1
+    )
+    vm['delai_paiement_fourn'] = np.random.choice([30, 30, 45, 60], size=n, p=[0.5, 0.2, 0.2, 0.1])
+
+    df = vm[['facture_id', 'date_facture', 'sku', 'qte_achat',
+             'montant_marchandises_ht', 'montant_transport_ht',
+             'montant_total_ht', 'delai_paiement_fourn']].rename(columns={'qte_achat': 'quantite'})
+
     print(f"  ✓ {len(df):,} factures d'achat générées")
     return df
 
