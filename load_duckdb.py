@@ -133,9 +133,14 @@ def creer_vues(con):
 
     con.execute("""
         CREATE OR REPLACE VIEW v_encaissements AS
-        SELECT e.commande_id, e.date_cmd, e.date_encaissement, e.delai_jours,
-               e.montant_ht, c.canal,
-               CAST(strftime(e.date_cmd, '%Y-%m') AS VARCHAR) AS annee_mois
+        SELECT
+            e.commande_id,
+            TRY_CAST(e.date_cmd AS DATE)                              AS date_cmd,
+            e.date_encaissement,
+            TRY_CAST(e.delai_jours AS INTEGER)                        AS delai_jours,
+            TRY_CAST(e.montant_ht AS DOUBLE)                          AS montant_ht,
+            c.canal,
+            CAST(strftime(TRY_CAST(e.date_cmd AS DATE), '%Y-%m') AS VARCHAR) AS annee_mois
         FROM fact_encaissements e
         LEFT JOIN fact_ventes v ON e.commande_id = v.commande_id
         LEFT JOIN dim_canal   c ON v.canal_id = c.canal_id;
