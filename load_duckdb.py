@@ -41,7 +41,6 @@ def charger_donnees():
 
     db_path_str = str(DB_PATH)
 
-    # On supprime le fichier existant pour éviter tout conflit
     import os
     if os.path.exists(db_path_str):
         os.remove(db_path_str)
@@ -61,14 +60,28 @@ def charger_donnees():
             raise FileNotFoundError(f"❌ Fichier introuvable : {chemin}")
 
         chemin_str = str(chemin).replace("\\", "/")
-        con.execute(f"""
-            CREATE TABLE {table} AS
-            SELECT * FROM read_csv('{chemin_str}',
-                delim=';',
-                header=true,
-                ignore_errors=true,
-                nullstr='');
-        """)
+
+        if table == 'fact_encaissements':
+            # date_encaissement peut contenir des valeurs corrompues → VARCHAR
+            con.execute(f"""
+                CREATE TABLE {table} AS
+                SELECT * FROM read_csv('{chemin_str}',
+                    delim=';',
+                    header=true,
+                    ignore_errors=true,
+                    nullstr='',
+                    types={{'date_encaissement': 'VARCHAR'}});
+            """)
+        else:
+            con.execute(f"""
+                CREATE TABLE {table} AS
+                SELECT * FROM read_csv('{chemin_str}',
+                    delim=';',
+                    header=true,
+                    ignore_errors=true,
+                    nullstr='');
+            """)
+
         n = con.execute(f"SELECT COUNT(*) FROM {table};").fetchone()[0]
         print(f"  ✓ {table:25s} {n:>10,} lignes")
 
