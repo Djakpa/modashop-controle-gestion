@@ -62,24 +62,23 @@ def charger_donnees():
         chemin_str = str(chemin).replace("\\", "/")
 
         if table == 'fact_encaissements':
-            # date_encaissement peut contenir des valeurs corrompues → VARCHAR
+            # Chargement brut sans conversion de type pour éviter le ConversionException
+            # sur date_encaissement qui peut contenir des valeurs corrompues
             con.execute(f"""
                 CREATE TABLE {table} AS
-                SELECT * FROM read_csv('{chemin_str}',
+                SELECT * FROM read_csv_auto('{chemin_str}',
                     delim=';',
                     header=true,
                     ignore_errors=true,
-                    nullstr='',
-                    types={{'date_encaissement': 'VARCHAR'}});
+                    all_varchar=true);
             """)
         else:
             con.execute(f"""
                 CREATE TABLE {table} AS
-                SELECT * FROM read_csv('{chemin_str}',
+                SELECT * FROM read_csv_auto('{chemin_str}',
                     delim=';',
                     header=true,
-                    ignore_errors=true,
-                    nullstr='');
+                    ignore_errors=true);
             """)
 
         n = con.execute(f"SELECT COUNT(*) FROM {table};").fetchone()[0]
