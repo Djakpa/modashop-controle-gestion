@@ -39,11 +39,16 @@ def charger_donnees():
     print("CHARGEMENT MODASHOP DANS DUCKDB")
     print("=" * 60)
 
-    db_path_str = str(DB_PATH)
-
     import os
-    if os.path.exists(db_path_str):
-        os.remove(db_path_str)
+
+    # Chemin absolu basé sur le répertoire de ce fichier pour éviter les conflits
+    base_dir = Path(__file__).parent
+    db_abs = base_dir / DB_PATH
+    db_path_str = str(db_abs)
+
+    # Suppression de la base existante pour repartir propre
+    if db_abs.exists():
+        db_abs.unlink()
 
     con = duckdb.connect(db_path_str)
     print(f"\n📂 Base ouverte : {db_path_str}")
@@ -54,8 +59,11 @@ def charger_donnees():
         con.execute(f"DROP VIEW IF EXISTS {table};")
 
     print("\n[2/4] Chargement des CSV...")
+    # DATA_DIR peut être relatif → on le résout depuis le répertoire de ce fichier
+    data_dir_abs = (base_dir / DATA_DIR) if not Path(DATA_DIR).is_absolute() else Path(DATA_DIR)
+
     for table, fichier in TABLES.items():
-        chemin = Path(str(DATA_DIR)) / fichier
+        chemin = data_dir_abs / fichier
         if not chemin.exists():
             raise FileNotFoundError(f"❌ Fichier introuvable : {chemin}")
 
